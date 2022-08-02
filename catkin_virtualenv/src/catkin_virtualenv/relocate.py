@@ -21,6 +21,7 @@
 import os
 import re
 import subprocess
+import tempfile
 
 from . import run_command
 
@@ -53,7 +54,11 @@ def fix_shebangs(venv_dir, target_dir):
         regex = (
             r"s-^#!.*bin/\(env \)\?{names}\"\?-#!{pythonpath}-;" r"s-^'''exec'.*bin/{names}-'''exec' {pythonpath}-"
         ).format(names=_PYTHON_INTERPRETERS_REGEX, pythonpath=re.escape(pythonpath))
-        run_command(["sed", "-i", regex, f], check=True)
+        _, tmp_filename = tempfile.mkstemp()
+        with open(tmp_filename, 'wb') as out_f:
+            run_command(["sed", regex, f], check=True, capture_output=True, stdout=out_f)
+        run_command(["cat", tmp_filename], check=True, capture_output=True, stdout=f)
+        os.remove(tmp_filename)
 
 
 def fix_activate_path(venv_dir, target_dir):
