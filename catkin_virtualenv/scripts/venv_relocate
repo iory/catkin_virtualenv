@@ -31,11 +31,9 @@ if __name__ == '__main__':
     parser.add_argument(
         'venv', help="Path where virtualenv currently is")
     parser.add_argument(
-        '--target-dir', required=True, help="Path where virtualenv will live.")
+        '--uv', required=True, help="uv executable to use.")
 
     args = parser.parse_args()
 
-    venv = Virtualenv(args.venv)
-    venv.relocate(
-        target_dir=args.target_dir,
-    )
+    venv = Virtualenv(args.venv, uv=args.uv)
+    venv.relocate()

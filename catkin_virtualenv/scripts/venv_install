@@ -20,7 +20,7 @@
 
 import argparse
 
-from catkin_virtualenv import configure_logging
+from catkin_virtualenv import configure_logging, parse_extra_args
 from catkin_virtualenv.venv import Virtualenv
 
 
@@ -33,14 +33,14 @@ if __name__ == '__main__':
     parser.add_argument(
         '--requirements', required=True, nargs='+', help="Requirements to sync to virtualenv.")
     parser.add_argument(
-        '--extra-pip-args', default='""', type=str, help="Extra pip args for install.")
+        '--extra-uv-args', default='""', type=str, help="Extra args for uv pip.")
+    parser.add_argument(
+        '--uv', required=True, help="uv executable to use.")
 
     args = parser.parse_args()
 
-    extra_pip_args = args.extra_pip_args[1:-1]
-
-    venv = Virtualenv(args.venv)
+    venv = Virtualenv(args.venv, uv=args.uv)
     venv.install(
         requirements=args.requirements,
-        extra_pip_args=[arg for arg in extra_pip_args.split(" ") if arg != ""],
+        extra_uv_args=parse_extra_args(args.extra_uv_args),
     )

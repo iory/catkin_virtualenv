@@ -2,4 +2,3 @@ catkin-pkg
 nose-py3
 rospkg
 setproctitle
-wheel==0.45.1

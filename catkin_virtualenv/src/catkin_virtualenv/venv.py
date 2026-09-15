@@ -17,24 +17,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
-from __future__ import print_function
-
 import difflib
 import logging
 import os
 import re
 import shutil
-import subprocess
 
-try:
-    from urllib.request import urlretrieve
-except ImportError:
-    # for python2
-    from urllib import urlretrieve
-
-from distutils.spawn import find_executable
-
-from . import run_command, relocate
+from . import run_command
 from .collect_requirements import collect_requirements
 
 _BYTECODE_REGEX = re.compile(r".*\.py[co]")
@@ -43,109 +32,79 @@ _COMMENT_REGEX = re.compile(r"(^|\s+)#.*$", flags=re.MULTILINE)
 logger = logging.getLogger(__name__)
 
 
+def find_uv(uv):
+    """Resolve the uv executable.
+
+    Parameters
+    ----------
+    uv : str
+        Path of the uv executable, normally the one bundled with catkin_virtualenv.
+
+    Returns
+    -------
+    str
+        Absolute path to the uv executable.
+    """
+    uv_executable = shutil.which(uv)
+    if uv_executable is None:
+        raise RuntimeError("uv executable {} does not exist or is not executable.".format(uv))
+    return os.path.abspath(uv_executable)
+
+
 class Virtualenv:
-    def __init__(self, path):
-        """Manage a virtualenv at the specified path."""
+    def __init__(self, path, uv):
+        """Manage a uv-created virtualenv at the specified path."""
         self.path = path
+        self.uv = find_uv(uv)
 
-    def initialize(self, python, use_system_packages, extra_pip_args, clean=True):
-        """Initialize a new virtualenv using the specified python version and extra arguments."""
-        if clean:
-            try:
-                shutil.rmtree(self.path)
-            except Exception:
-                pass
+    def initialize(self, python, use_system_packages, clean=True):
+        """Initialize a new relocatable virtualenv using the specified python interpreter."""
+        if clean and os.path.exists(self.path):
+            shutil.rmtree(self.path)
 
-        system_python = find_executable(python)
-
+        # Resolve the interpreter ourselves: given a bare name such as 'python3', uv would prefer a uv-managed
+        # python over the system one, and ROS packages must run against the system interpreter.
+        system_python = shutil.which(python)
         if not system_python:
             error_msg = "Unable to find a system-installed {}.".format(python)
             if python and python[0].isdigit():
                 error_msg += " Perhaps you meant python{}".format(python)
             raise RuntimeError(error_msg)
 
-        python_version = self._get_python_version(system_python)
-        if python_version >= (3, 12):
-            preinstall = [
-                "pip==26.0.1",
-                "pip-tools==7.5.3",
-                "setuptools==82.0.0",
-            ]
-        else:
-            preinstall = [
-                "pip==24.0",
-                "pip-tools==7.4.1",
-            ]
-
-        builtin_venv = self._check_module(system_python, "venv")
-        if builtin_venv:
-            virtualenv = [system_python, "-m", "venv"]
-        else:
-            virtualenv = ["virtualenv", "--no-setuptools", "--verbose", "--python", python]
-            # py2's virtualenv command will try install latest setuptools. setuptools>=45 not compatible with py2,
-            # but we do require a reasonably up-to-date version (because of pip==20.1), so v44 at least.
-            # For Python 3.x (< 3.12), setuptools is not yet pinned in preinstall but is needed.
-            if python_version < (3, 0):
-                preinstall += ["setuptools>=44,<45"]
-            elif python_version < (3, 12):
-                preinstall += ["setuptools"]
-
+        # --relocatable makes entrypoints and activation scripts path-independent, so the venv can be copied
+        # into the devel and install spaces as-is.
+        command = [self.uv, "venv", "--relocatable", "--python", system_python]
         if use_system_packages:
-            virtualenv.append("--system-site-packages")
+            command.append("--system-site-packages")
+        command.append(self.path)
+        run_command(command, check=True)
 
-        without_pip = self._check_module(system_python, "ensurepip") is False
-        if without_pip:
-            virtualenv.append("--without-pip")
-
-        virtualenv.append(self.path)
-        run_command(virtualenv, check=True)
-
-        if without_pip:
-            # install pip via get-pip.py
-            version_proc = run_command(
-                ["python", "-cimport sys; print('{}.{}'.format(*sys.version_info))"], capture_output=True
-            )
-            version = version_proc.stdout
-            if isinstance(version, bytes):
-                version = version.decode("utf-8")
-            version = version.strip()
-            # download pip from https://bootstrap.pypa.io/pip/
-            get_pip_path, _ = urlretrieve("https://bootstrap.pypa.io/pip/get-pip.py")
-            run_command([self._venv_bin("python"), get_pip_path], check=True)
-
-        # (gservin): test --no-cache-dir
-        run_command(
-            [self._venv_bin("python"), "-m", "pip", "install", "--no-cache-dir", "-vvv"] + extra_pip_args + preinstall,
-            check=True,
-        )
-
-    def install(self, requirements, extra_pip_args):
-        """Purge the cache first before installing."""  # (KLAD) testing to debug an issue on build farm
-        command = [self._venv_bin("python"), "-m", "pip", "cache", "purge"]
-        """ Sync a virtualenv with the specified requirements."""  # (KLAD) testing no-cache-dir
-        command = [self._venv_bin("python"), "-m", "pip", "install", "-vvv", "--no-cache-dir"] + extra_pip_args
+    def install(self, requirements, extra_uv_args):
+        """Sync a virtualenv with the specified requirements."""
+        command = [self.uv, "pip", "install", "--python", self._venv_bin("python")] + extra_uv_args
+        # Install one file at a time so that later requirements (i.e. this package's) override inherited ones.
         for req in requirements:
             run_command(command + ["-r", req], check=True)
 
-    def check(self, requirements, extra_pip_args):
+    def check(self, requirements, extra_uv_args):
         """Check if a set of requirements is completely locked."""
         with open(requirements, "r") as f:
             existing_requirements = f.read()
 
         # Re-lock the requirements
-        command = [self._find_pip_compile(), "--no-header", "--annotation-style", "line", requirements, "-o", "-"]
-        if extra_pip_args:
-            command += ["--pip-args", " ".join(extra_pip_args)]
-
-        generated_requirements = run_command(command, check=True, capture_output=True).stdout.decode()
+        command = self._compile_command(requirements, extra_uv_args)
+        result = run_command(command, capture_output=True)
+        if result.returncode != 0:
+            raise RuntimeError("Failed to re-lock {}:\n{}".format(requirements, result.stderr.decode()))
+        generated_requirements = result.stdout.decode()
 
         def _format(content):
             # Remove comments
             content = _COMMENT_REGEX.sub("", content)
             # Remove case sensitivity
             content = content.lower()
-            # Split into lines for diff
-            content = content.splitlines()
+            # Split into lines for diff, dropping blank lines
+            content = [line.strip() for line in content.splitlines() if line.strip()]
             # ignore order
             content.sort()
             return content
@@ -155,7 +114,7 @@ class Virtualenv:
 
         return diff
 
-    def lock(self, package_name, input_requirements, no_overwrite, extra_pip_args):
+    def lock(self, package_name, input_requirements, no_overwrite, extra_uv_args):
         """Create a frozen requirement set from a set of input specifications."""
         try:
             output_requirements = collect_requirements(package_name, no_deps=True)[0]
@@ -167,9 +126,6 @@ class Virtualenv:
             logger.info("Lock file already exists, not overwriting")
             return
 
-        pip_compile = self._find_pip_compile()
-        command = [pip_compile, "--no-header", "--annotation-style", "line", input_requirements]
-
         if os.path.normpath(input_requirements) == os.path.normpath(output_requirements):
             raise RuntimeError(
                 "Trying to write locked requirements {} into a path specified as input: {}".format(
@@ -177,64 +133,35 @@ class Virtualenv:
                 )
             )
 
-        if extra_pip_args:
-            command += ["--pip-args", " ".join(extra_pip_args)]
-
-        command += ["-o", output_requirements]
-
+        command = self._compile_command(input_requirements, extra_uv_args) + ["-o", output_requirements]
         run_command(command, check=True)
 
         logger.info("Wrote new lock file to {}".format(output_requirements))
 
-    def relocate(self, target_dir):
-        """Relocate a virtualenv to another directory."""
+    def relocate(self):
+        """Prepare a copied virtualenv for its final location."""
+        # The venv itself is created with --relocatable, only bytecode still embeds absolute paths.
         self._delete_bytecode()
-        relocate.fix_shebangs(self.path, target_dir)
-        relocate.fix_activate_path(self.path, target_dir)
 
-        # This workaround has been flaky - let's just delete the 'local' folder entirely
-        # relocate.fix_local_symlinks(self.path)
-        local_dir = os.path.join(self.path, "local")
-        if os.path.exists(local_dir):
-            shutil.rmtree(local_dir)
+    def _compile_command(self, requirements, extra_uv_args):
+        # Resolve against the venv's interpreter so environment markers match the python in use.
+        return [
+            self.uv,
+            "pip",
+            "compile",
+            "--quiet",
+            "--no-header",
+            "--annotation-style",
+            "line",
+            "--python",
+            self._venv_bin("python"),
+        ] + extra_uv_args + [requirements]
 
     def _venv_bin(self, binary_name):
-        if os.path.exists(os.path.join(self.path, "bin", binary_name)):
-            return os.path.abspath(os.path.join(self.path, "bin", binary_name))
-        elif os.path.exists(os.path.join(self.path, "local", "bin", binary_name)):
-            return os.path.abspath(os.path.join(self.path, "local", "bin", binary_name))
-        raise RuntimeError("Binary {} not found in venv".format(binary_name))
-
-    def _find_pip_compile(self):
-        try:
-            return self._venv_bin("pip-compile")
-        except RuntimeError as exc:
-            global_pip_compile = shutil.which("pip-compile")
-            if global_pip_compile is None:
-                raise RuntimeError("pip-compile not found found in Venv or global PATH") from exc
-            return global_pip_compile
-
-    def _get_python_version(self, python_executable):
-        result = run_command(
-            [python_executable, "-c",
-             "import sys; sys.stdout.write('%s %s\\n' % (sys.version_info[0], sys.version_info[1]))"],
-            capture_output=True,
-            check=True,
-        )
-        stdout = result.stdout
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode("utf-8")
-        major, minor = stdout.strip().split()
-        return (int(major), int(minor))
-
-    def _check_module(self, python_executable, module):
-        try:
-            with open(os.devnull, "w") as devnull:
-                # "-c 'import venv'" does not work with the subprocess module, but '-cimport venv' does
-                run_command([python_executable, "-cimport {}".format(module)], stderr=devnull, check=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
+        binary_path = os.path.join(self.path, "bin", binary_name)
+        if os.path.exists(binary_path):
+            return os.path.abspath(binary_path)
+        raise RuntimeError("Binary {} not found in venv {}".format(binary_name, self.path))
 
     def _delete_bytecode(self):
         """Remove all .py[co] files since they embed absolute paths."""

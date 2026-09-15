@@ -31,20 +31,16 @@ if __name__ == '__main__':
     parser.add_argument(
         'venv', help="Path where to initialize the virtualenv")
     parser.add_argument(
-        '--python', default="python3", help="Build the virtualenv with which python version.")
+        '--python', default="python3", help="Build the virtualenv with which python interpreter.")
     parser.add_argument(
         '--use-system-packages', action="store_true", help="Use system site packages.")
     parser.add_argument(
-        '--extra-pip-args', default='""', type=str, help="Extra pip args for install.")
+        '--uv', required=True, help="uv executable to use.")
 
     args = parser.parse_args()
 
-    extra_pip_args = args.extra_pip_args[1:-1]
-
-    print(args.use_system_packages)
-    venv = Virtualenv(args.venv)
+    venv = Virtualenv(args.venv, uv=args.uv)
     venv.initialize(
         python=args.python,
         use_system_packages=args.use_system_packages,
-        extra_pip_args=[arg for arg in extra_pip_args.split(" ") if arg != ""],
     )

@@ -12,9 +12,15 @@ This package provides a mechanism to:
 At build time, CMake macros provided by this package will create a virtualenv inside the devel space, and create
 wrapper scripts for any Python scripts in the package. Both will be included in any associated bloom artifacts.
 
+Virtualenvs are created, populated and locked with [uv](https://docs.astral.sh/uv/). pip, pip-tools and virtualenv
+are no longer used.
+
 This library is GPL licensed due to the inclusion of dh_virtualenv.
 
 Compatibility:
+- uv does not need to be installed: catkin_virtualenv downloads a pinned uv (currently 0.12.14) from PyPI when it is
+  built, and every package uses that copy. To use a different uv, configure with
+  `-DCATKIN_VIRTUALENV_UV_EXECUTABLE=/path/to/uv`.
 - Python 3.7+
 - Ubuntu 20.04+, maybe others
 - ROS Noetic, maybe others
@@ -133,16 +139,25 @@ catkin_generate_virtualenv(
   # Disable renaming the process names to hide the interpreter name, this has can create issues when executing the process as root.
   RENAME_PROCESS FALSE # Default TRUE
 
-  # Provide extra arguments to the underlying pip invocation
-  EXTRA_PIP_ARGS
-    --no-binary=:all:
-    -vvv
+  # Provide extra arguments to the underlying `uv pip install` and `uv pip compile` invocations
+  EXTRA_UV_ARGS
+    --index-url https://example.com/simple
+    -v
 )
 ```
 
+`EXTRA_PIP_ARGS` is deprecated: it is still accepted, but its arguments are handed to `uv pip`, which does not
+understand every pip option (e.g. `--retries`, `--timeout`). uv-wide settings such as the cache location, timeouts
+or offline mode are best set through [uv environment variables](https://docs.astral.sh/uv/reference/environment/)
+(`UV_CACHE_DIR`, `UV_HTTP_TIMEOUT`, `UV_OFFLINE`, ...).
+
+The virtualenv is created with `uv venv --relocatable` and contains no seed packages: `pip`, `setuptools` and `wheel`
+are only present if a requirements file asks for them (or, with `USE_SYSTEM_PACKAGES`, if they are installed on the
+system).
+
 ### Locking dependencies
 
-This project allows you to lock dependencies by leveraging `pip-compile`. This is optional, but will prevent your
+This project allows you to lock dependencies by leveraging `uv pip compile`. This is optional, but will prevent your
 python projects from spontaneously combusting in the future!
 
 Instead of managing a `requirements.txt` file, you will manage a `requirements.in` file, and catkin_virtualenv will generate the `requirements.txt` file for you upon build.

@@ -18,6 +18,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 import logging
+import shlex
 import subprocess
 
 logger = logging.getLogger(__name__)
@@ -37,3 +38,19 @@ def run_command(cmd, *args, **kwargs):
         kwargs["stdout"] = subprocess.PIPE
         kwargs["stderr"] = subprocess.PIPE
     return subprocess.run(cmd, *args, **kwargs)
+
+
+def parse_extra_args(extra_args):
+    """Split the quoted, space-separated argument string that CMake passes through make and the shell.
+
+    Parameters
+    ----------
+    extra_args : str
+        Arguments wrapped in literal double quotes, e.g. '"--index-url https://example.com"'.
+
+    Returns
+    -------
+    list of str
+        Individual arguments.
+    """
+    return shlex.split(extra_args[1:-1])
