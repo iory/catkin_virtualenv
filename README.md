@@ -143,6 +143,12 @@ catkin_generate_virtualenv(
   EXTRA_UV_ARGS
     --index-url https://example.com/simple
     -v
+
+  # Provide extra arguments only to `uv pip compile` (locking and the venv_check test), e.g. a lock file that
+  # installs on every python the package supports instead of only the one it was built with
+  EXTRA_UV_COMPILE_ARGS
+    --universal
+    --python-version 3.10
 )
 ```
 

@@ -39,6 +39,8 @@ if __name__ == '__main__':
     parser.add_argument(
         '--extra-uv-args', default='""', type=str, help="Extra args for uv pip.")
     parser.add_argument(
+        '--extra-uv-compile-args', default='""', type=str, help="Extra args only for uv pip compile.")
+    parser.add_argument(
         '--uv', required=True, help="uv executable to use.")
     parser.add_argument(
         '--xunit-output', help="Destination where to write xunit output.")
@@ -49,6 +51,7 @@ if __name__ == '__main__':
     diff = venv.check(
         requirements=args.requirements,
         extra_uv_args=parse_extra_args(args.extra_uv_args),
+        extra_uv_compile_args=parse_extra_args(args.extra_uv_compile_args),
     )
 
     if args.xunit_output:

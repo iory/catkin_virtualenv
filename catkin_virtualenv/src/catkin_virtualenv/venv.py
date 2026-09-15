@@ -86,13 +86,13 @@ class Virtualenv:
         for req in requirements:
             run_command(command + ["-r", req], check=True)
 
-    def check(self, requirements, extra_uv_args):
+    def check(self, requirements, extra_uv_args, extra_uv_compile_args=()):
         """Check if a set of requirements is completely locked."""
         with open(requirements, "r") as f:
             existing_requirements = f.read()
 
         # Re-lock the requirements
-        command = self._compile_command(requirements, extra_uv_args)
+        command = self._compile_command(requirements, extra_uv_args, extra_uv_compile_args)
         result = run_command(command, capture_output=True)
         if result.returncode != 0:
             raise RuntimeError("Failed to re-lock {}:\n{}".format(requirements, result.stderr.decode()))
@@ -114,7 +114,7 @@ class Virtualenv:
 
         return diff
 
-    def lock(self, package_name, input_requirements, no_overwrite, extra_uv_args):
+    def lock(self, package_name, input_requirements, no_overwrite, extra_uv_args, extra_uv_compile_args=()):
         """Create a frozen requirement set from a set of input specifications."""
         try:
             output_requirements = collect_requirements(package_name, no_deps=True)[0]
@@ -133,7 +133,7 @@ class Virtualenv:
                 )
             )
 
-        command = self._compile_command(input_requirements, extra_uv_args) + ["-o", output_requirements]
+        command = self._compile_command(input_requirements, extra_uv_args, extra_uv_compile_args) + ["-o", output_requirements]
         run_command(command, check=True)
 
         logger.info("Wrote new lock file to {}".format(output_requirements))
@@ -143,7 +143,7 @@ class Virtualenv:
         # The venv itself is created with --relocatable, only bytecode still embeds absolute paths.
         self._delete_bytecode()
 
-    def _compile_command(self, requirements, extra_uv_args):
+    def _compile_command(self, requirements, extra_uv_args, extra_uv_compile_args=()):
         # Resolve against the venv's interpreter so environment markers match the python in use.
         return [
             self.uv,
@@ -155,7 +155,7 @@ class Virtualenv:
             "line",
             "--python",
             self._venv_bin("python"),
-        ] + extra_uv_args + [requirements]
+        ] + list(extra_uv_args) + list(extra_uv_compile_args) + [requirements]
 
     def _venv_bin(self, binary_name):
         binary_path = os.path.join(self.path, "bin", binary_name)

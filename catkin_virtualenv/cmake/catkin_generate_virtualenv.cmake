@@ -18,7 +18,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 function(catkin_generate_virtualenv)
   set(oneValueArgs PYTHON_VERSION PYTHON_INTERPRETER USE_SYSTEM_PACKAGES ISOLATE_REQUIREMENTS INPUT_REQUIREMENTS CHECK_VENV)
-  set(multiValueArgs EXTRA_UV_ARGS EXTRA_PIP_ARGS)
+  set(multiValueArgs EXTRA_UV_ARGS EXTRA_UV_COMPILE_ARGS EXTRA_PIP_ARGS)
   cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN} )
 
   ### Handle argument defaults and deprecations
@@ -64,6 +64,9 @@ ${PROJECT_NAME} (catkin_make is not supported), or set CATKIN_VIRTUALENV_UV_EXEC
   string(REPLACE ";" "\ " processed_uv_args "${ARG_EXTRA_UV_ARGS}")
   # Double-escape needed to get quote down through cmake->make->shell layering
   set(processed_uv_args \\\"${processed_uv_args}\\\")
+  # Arguments only for locking (uv pip compile), e.g. --universal, which uv pip install does not accept
+  string(REPLACE ";" "\ " processed_uv_compile_args "${ARG_EXTRA_UV_COMPILE_ARGS}")
+  set(processed_uv_compile_args \\\"${processed_uv_compile_args}\\\")
 
   # Check if this package already has a virtualenv target before creating one
   if(TARGET ${PROJECT_NAME}_generate_virtualenv)
@@ -128,7 +131,7 @@ ${PROJECT_NAME} (catkin_make is not supported), or set CATKIN_VIRTUALENV_UV_EXEC
       OUTPUT ${package_requirements}
       COMMAND ${CATKIN_ENV} rosrun catkin_virtualenv venv_lock ${CMAKE_BINARY_DIR}/${venv_dir}
         --package-name ${PROJECT_NAME} --input-requirements ${ARG_INPUT_REQUIREMENTS}
-        --no-overwrite --extra-uv-args ${processed_uv_args} ${uv_args}
+        --no-overwrite --extra-uv-args ${processed_uv_args} --extra-uv-compile-args ${processed_uv_compile_args} ${uv_args}
       WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
       DEPENDS
         ${CMAKE_BINARY_DIR}/${venv_dir}/bin/python
@@ -171,7 +174,7 @@ ${PROJECT_NAME} (catkin_make is not supported), or set CATKIN_VIRTUALENV_UV_EXEC
     COMMENT "Manually invoked target to generate the lock file on demand"
     COMMAND ${CATKIN_ENV} rosrun catkin_virtualenv venv_lock ${CMAKE_BINARY_DIR}/${venv_dir}
       --package-name ${PROJECT_NAME} --input-requirements ${ARG_INPUT_REQUIREMENTS}
-      --extra-uv-args ${processed_uv_args} ${uv_args}
+      --extra-uv-args ${processed_uv_args} --extra-uv-compile-args ${processed_uv_compile_args} ${uv_args}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     DEPENDS
       ${venv_devel_dir}
@@ -181,7 +184,7 @@ ${PROJECT_NAME} (catkin_make is not supported), or set CATKIN_VIRTUALENV_UV_EXEC
   if(CATKIN_ENABLE_TESTING AND NOT package_requirements STREQUAL "" AND (NOT DEFINED ARG_CHECK_VENV OR ARG_CHECK_VENV))
     file(MAKE_DIRECTORY ${CATKIN_TEST_RESULTS_DIR}/${PROJECT_NAME})
     catkin_run_tests_target("venv_check" "${PROJECT_NAME}-requirements" "venv_check-${PROJECT_NAME}-requirements.xml"
-      COMMAND "${CATKIN_ENV} rosrun catkin_virtualenv venv_check ${venv_dir} --requirements ${package_requirements} --extra-uv-args \"${processed_uv_args}\" --uv ${uv_executable} --xunit-output ${CATKIN_TEST_RESULTS_DIR}/${PROJECT_NAME}/venv_check-${PROJECT_NAME}-requirements.xml"
+      COMMAND "${CATKIN_ENV} rosrun catkin_virtualenv venv_check ${venv_dir} --requirements ${package_requirements} --extra-uv-args \"${processed_uv_args}\" --extra-uv-compile-args \"${processed_uv_compile_args}\" --uv ${uv_executable} --xunit-output ${CATKIN_TEST_RESULTS_DIR}/${PROJECT_NAME}/venv_check-${PROJECT_NAME}-requirements.xml"
       DEPENDENCIES ${PROJECT_NAME}_generate_virtualenv
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
