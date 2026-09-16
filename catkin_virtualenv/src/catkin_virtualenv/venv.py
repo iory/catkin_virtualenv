@@ -114,10 +114,11 @@ class Virtualenv:
 
         return diff
 
-    def lock(self, package_name, input_requirements, no_overwrite, extra_uv_args, extra_uv_compile_args=()):
+    def lock(self, package_name, input_requirements, no_overwrite, extra_uv_args, extra_uv_compile_args=(),
+             variant=None):
         """Create a frozen requirement set from a set of input specifications."""
         try:
-            output_requirements = collect_requirements(package_name, no_deps=True)[0]
+            output_requirements = collect_requirements(package_name, no_deps=True, variant=variant)[0]
         except IndexError:
             logger.info("Package doesn't export any requirements, step can be skipped")
             return

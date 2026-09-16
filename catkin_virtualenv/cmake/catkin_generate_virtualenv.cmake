@@ -17,7 +17,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 function(catkin_generate_virtualenv)
-  set(oneValueArgs PYTHON_VERSION PYTHON_INTERPRETER USE_SYSTEM_PACKAGES ISOLATE_REQUIREMENTS INPUT_REQUIREMENTS CHECK_VENV)
+  set(oneValueArgs PYTHON_VERSION PYTHON_INTERPRETER USE_SYSTEM_PACKAGES ISOLATE_REQUIREMENTS INPUT_REQUIREMENTS CHECK_VENV
+    REQUIREMENTS_VARIANT)
   set(multiValueArgs EXTRA_UV_ARGS EXTRA_UV_COMPILE_ARGS EXTRA_PIP_ARGS)
   cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN} )
 
@@ -40,6 +41,14 @@ function(catkin_generate_virtualenv)
   if(ARG_ISOLATE_REQUIREMENTS)
     message(STATUS "Only using requirements from this catkin package")
     set(collect_args "--no-deps")
+  endif()
+
+  # A variant picks requirements-<variant>.txt (e.g. a CPU-only lock) instead of requirements.txt; the lock of
+  # this package is written there, and inherited packages without that variant use their usual file.
+  set(variant_args "")
+  if(ARG_REQUIREMENTS_VARIANT)
+    message(STATUS "Using the '${ARG_REQUIREMENTS_VARIANT}' requirements variant")
+    set(variant_args --variant ${ARG_REQUIREMENTS_VARIANT})
   endif()
 
   if(DEFINED ARG_EXTRA_PIP_ARGS)
@@ -89,18 +98,26 @@ ${PROJECT_NAME} (catkin_make is not supported), or set CATKIN_VIRTUALENV_UV_EXEC
   # Store just _this_ project's requirements file in ${package_requirements}
   execute_process(
     COMMAND ${CATKIN_ENV} rosrun catkin_virtualenv collect_requirements
-      --package-name ${PROJECT_NAME} --no-deps
+      --package-name ${PROJECT_NAME} --no-deps ${variant_args}
     OUTPUT_VARIABLE package_requirements
     OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE collect_result
   )
+  if(NOT collect_result EQUAL 0)
+    message(FATAL_ERROR "collect_requirements failed for ${PROJECT_NAME}")
+  endif()
 
   # Collect all of this project's inherited requirements into ${requirements_list}
   execute_process(
     COMMAND ${CATKIN_ENV} rosrun catkin_virtualenv collect_requirements
-      --package-name ${PROJECT_NAME} ${collect_args}
+      --package-name ${PROJECT_NAME} ${collect_args} ${variant_args}
     OUTPUT_VARIABLE requirements_list
     OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE collect_result
   )
+  if(NOT collect_result EQUAL 0)
+    message(FATAL_ERROR "collect_requirements failed for ${PROJECT_NAME}")
+  endif()
 
   # In isolated mode, we still need catkin_virtualenv's own requirements (setproctitle, nose, etc)
   if(ARG_ISOLATE_REQUIREMENTS)
@@ -132,6 +149,7 @@ ${PROJECT_NAME} (catkin_make is not supported), or set CATKIN_VIRTUALENV_UV_EXEC
       COMMAND ${CATKIN_ENV} rosrun catkin_virtualenv venv_lock ${CMAKE_BINARY_DIR}/${venv_dir}
         --package-name ${PROJECT_NAME} --input-requirements ${ARG_INPUT_REQUIREMENTS}
         --no-overwrite --extra-uv-args ${processed_uv_args} --extra-uv-compile-args ${processed_uv_compile_args} ${uv_args}
+        ${variant_args}
       WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
       DEPENDS
         ${CMAKE_BINARY_DIR}/${venv_dir}/bin/python
@@ -175,6 +193,7 @@ ${PROJECT_NAME} (catkin_make is not supported), or set CATKIN_VIRTUALENV_UV_EXEC
     COMMAND ${CATKIN_ENV} rosrun catkin_virtualenv venv_lock ${CMAKE_BINARY_DIR}/${venv_dir}
       --package-name ${PROJECT_NAME} --input-requirements ${ARG_INPUT_REQUIREMENTS}
       --extra-uv-args ${processed_uv_args} --extra-uv-compile-args ${processed_uv_compile_args} ${uv_args}
+      ${variant_args}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     DEPENDS
       ${venv_devel_dir}

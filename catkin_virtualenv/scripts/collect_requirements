@@ -31,12 +31,15 @@ if __name__ == '__main__':
         'package_name', help="Package name that virtualenv belongs to.")
     parser.add_argument(
         '--no-deps', action="store_true", help="Only collect requirements for top-level package.")
+    parser.add_argument(
+        '--variant', default='', help="Prefer requirements-<variant>.txt files, e.g. cpu.")
 
     args, unknown = parser.parse_known_args()
 
     requirements = collect_requirements.collect_requirements(
         package_name=args.package_name,
         no_deps=args.no_deps,
+        variant=args.variant or None,
     )
 
     print(';'.join(requirements))

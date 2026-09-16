@@ -33,6 +33,11 @@ CATKIN_VIRTUALENV_TAGNAME = "pip_requirements"
 logger = logging.getLogger(__name__)
 
 
+def _with_suffix(path, suffix):
+    base, ext = os.path.splitext(path)
+    return f"{base}-{suffix}{ext}"
+
+
 def get_distro_requirements_path(base_requirements_path):
     # type: (str) -> str
     """
@@ -44,10 +49,7 @@ def get_distro_requirements_path(base_requirements_path):
     if not codename:
         return base_requirements_path
 
-    # Split the path to insert the distro codename
-    base, ext = os.path.splitext(base_requirements_path)
-    distro_requirements_path = f"{base}-{codename}{ext}"
-
+    distro_requirements_path = _with_suffix(base_requirements_path, codename)
     if os.path.exists(distro_requirements_path):
         logger.info(f"Using distro-specific requirements file: {distro_requirements_path}")
         return distro_requirements_path
@@ -55,19 +57,40 @@ def get_distro_requirements_path(base_requirements_path):
     return base_requirements_path
 
 
-def parse_exported_requirements(package, package_dir):
-    # type: (catkin_pkg.package.Package) -> List[str]
+def get_requirements_path(base_requirements_path, variant=None, strict=False):
+    # type: (str, Optional[str], bool) -> str
+    """
+    Return the requirements file to use for a base path (e.g., 'requirements.txt').
+
+    With a variant (e.g., 'cpu'), 'requirements-cpu-jammy.txt' or 'requirements-cpu.txt' is used. When
+    ``strict`` (the package that owns the virtualenv) the variant file is used even if it does not exist
+    yet, since it is the lock file to write; otherwise (inherited requirements) a package without that
+    variant falls back to its distro-specific or base file.
+    """
+    if variant:
+        variant_path = _with_suffix(base_requirements_path, variant)
+        variant_distro_path = get_distro_requirements_path(variant_path)
+        if os.path.exists(variant_distro_path):
+            logger.info(f"Using {variant} requirements file: {variant_distro_path}")
+            return variant_distro_path
+        if strict:
+            return variant_path
+    return get_distro_requirements_path(base_requirements_path)
+
+
+def parse_exported_requirements(package, package_dir, variant=None, strict=False):
+    # type: (catkin_pkg.package.Package, str, Optional[str], bool) -> List[str]
     requirements_list = []
     for export in package.exports:
         if export.tagname == CATKIN_VIRTUALENV_TAGNAME:
             base_requirements_path = os.path.join(package_dir, export.content)
-            requirements_path = get_distro_requirements_path(base_requirements_path)
+            requirements_path = get_requirements_path(base_requirements_path, variant, strict)
             requirements_list.append(requirements_path)
     return requirements_list
 
 
-def process_package(package_name, soft_fail=True):
-    # type: (str) -> List[str], List[str]
+def process_package(package_name, soft_fail=True, variant=None):
+    # type: (str, bool, Optional[str]) -> List[str], List[str]
     try:
         package_path = find_in_workspaces(project=package_name, path="package.xml", first_match_only=True,)[0]
     except IndexError:
@@ -79,12 +102,14 @@ def process_package(package_name, soft_fail=True):
     else:
         package = parse_package(package_path)
         dependencies = package.build_depends + package.test_depends
-        return parse_exported_requirements(package, os.path.dirname(package_path)), dependencies
+        requirements = parse_exported_requirements(
+            package, os.path.dirname(package_path), variant=variant, strict=not soft_fail)
+        return requirements, dependencies
 
 
-def collect_requirements(package_name, no_deps=False):
-    # type: (str, bool) -> List[str]
-    """ Collect requirements inherited by a package. """
+def collect_requirements(package_name, no_deps=False, variant=None):
+    # type: (str, bool, Optional[str]) -> List[str]
+    """ Collect requirements inherited by a package, preferring the files of a variant (e.g. 'cpu'). """
     package_queue = Queue()
     package_queue.put(package_name)
     processed_packages = set()
@@ -96,7 +121,7 @@ def collect_requirements(package_name, no_deps=False):
         if queued_package not in processed_packages:
             processed_packages.add(queued_package)
             requirements, dependencies = process_package(
-                package_name=queued_package, soft_fail=(queued_package != package_name)
+                package_name=queued_package, soft_fail=(queued_package != package_name), variant=variant
             )
             requirements_list = requirements + requirements_list
 

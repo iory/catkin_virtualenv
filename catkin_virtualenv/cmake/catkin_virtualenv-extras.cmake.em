@@ -11,3 +11,4 @@ get_filename_component(@(PROJECT_NAME)_UV_EXECUTABLE
 # Include cmake modules from @(PROJECT_NAME)
 include(${@(PROJECT_NAME)_CMAKE_DIR}/catkin_generate_virtualenv.cmake)
 include(${@(PROJECT_NAME)_CMAKE_DIR}/catkin_install_python.cmake)
+include(${@(PROJECT_NAME)_CMAKE_DIR}/catkin_virtualenv_detect_cuda.cmake)
