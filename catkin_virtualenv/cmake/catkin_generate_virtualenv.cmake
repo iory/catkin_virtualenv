@@ -157,10 +157,17 @@ ${PROJECT_NAME} (catkin_make is not supported), or set CATKIN_VIRTUALENV_UV_EXEC
     )
   endif()
 
+  # uv pip install leaves the files of the venv untouched when only the packages change, so the steps
+  # below are chained with stamps rather than with files of the venv, which would stay older than their
+  # dependencies and make the copies to the devel and install spaces go stale.
+  set(install_stamp ${CMAKE_BINARY_DIR}/${venv_dir}_installed.stamp)
+  set(relocate_stamp ${CMAKE_BINARY_DIR}/${venv_dir}_relocated.stamp)
+
   add_custom_command(COMMENT "Install requirements to ${CMAKE_BINARY_DIR}/${venv_dir}"
-    OUTPUT ${CMAKE_BINARY_DIR}/${venv_dir}/bin/activate
+    OUTPUT ${install_stamp}
     COMMAND ${CATKIN_ENV} rosrun catkin_virtualenv venv_install ${venv_dir}
       --requirements ${requirements_list} --extra-uv-args ${processed_uv_args} ${uv_args}
+    COMMAND ${CMAKE_COMMAND} -E touch ${install_stamp}
     DEPENDS
       ${CMAKE_BINARY_DIR}/${venv_dir}/bin/python
       ${package_requirements}
@@ -168,24 +175,25 @@ ${PROJECT_NAME} (catkin_make is not supported), or set CATKIN_VIRTUALENV_UV_EXEC
   )
 
   add_custom_command(COMMENT "Prepare relocated virtualenvs for develspace and installspace"
-    OUTPUT ${venv_devel_dir} install/${venv_dir}
+    OUTPUT ${relocate_stamp}
     # CMake copy_directory doesn't preserve symlinks https://gitlab.kitware.com/cmake/cmake/issues/14609
     # COMMAND ${CMAKE_COMMAND} -E copy_directory ${venv_dir} ${venv_devel_dir}
     # COMMAND ${CMAKE_COMMAND} -E copy_directory ${venv_dir} install/${venv_dir}
+    # The copies are made afresh, so that they hold exactly what the venv does
+    COMMAND rm -rf ${venv_devel_dir} install/${venv_dir}
     COMMAND mkdir -p ${venv_devel_dir} && cp -r ${venv_dir}/* ${venv_devel_dir}
     COMMAND mkdir -p install/${venv_dir} && cp -r ${venv_dir}/* install/${venv_dir}
 
     # The virtualenv is created with --relocatable, so the copies only need their bytecode cleaned up
     COMMAND ${CATKIN_ENV} rosrun catkin_virtualenv venv_relocate ${venv_devel_dir} ${uv_args}
     COMMAND ${CATKIN_ENV} rosrun catkin_virtualenv venv_relocate install/${venv_dir} ${uv_args}
-    DEPENDS ${CMAKE_BINARY_DIR}/${venv_dir}/bin/activate
+    COMMAND ${CMAKE_COMMAND} -E touch ${relocate_stamp}
+    DEPENDS ${install_stamp}
   )
 
   add_custom_target(${PROJECT_NAME}_generate_virtualenv ALL
     COMMENT "Per-package virtualenv target"
-    DEPENDS
-      ${venv_devel_dir}
-      install/${venv_dir}
+    DEPENDS ${relocate_stamp}
   )
 
   add_custom_target(${PROJECT_NAME}_venv_lock
@@ -196,7 +204,7 @@ ${PROJECT_NAME} (catkin_make is not supported), or set CATKIN_VIRTUALENV_UV_EXEC
       ${variant_args}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     DEPENDS
-      ${venv_devel_dir}
+      ${relocate_stamp}
       ${PROJECT_SOURCE_DIR}/${ARG_INPUT_REQUIREMENTS}
   )
 
